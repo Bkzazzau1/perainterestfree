@@ -1,5 +1,5 @@
-use serde::Serialize;
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Serialize)]

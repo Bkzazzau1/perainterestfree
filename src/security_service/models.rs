@@ -14,3 +14,9 @@ pub struct SetPinPayload {
     pub password: String,
     pub new_pin: String, // The 4-digit PIN
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyPinPayload {
+    pub pin: String,
+}

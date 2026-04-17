@@ -1,22 +1,23 @@
+use crate::admin_auth_service::models::AdminClaims;
+use crate::{error::AppError, AppState};
 use axum::{
     extract::{Request, State},
-    http::{header},
+    http::header,
     middleware::Next,
     response::Response,
 };
-use crate::{error::AppError, AppState};
-use crate::admin_auth_service::models::AdminClaims;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 
 /// Middleware to protect all /admin/* routes
+#[allow(dead_code)]
 pub async fn admin_auth_middleware(
     State(state): State<AppState>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-
     // 1. Extract the token
-    let token = req.headers()
+    let token = req
+        .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))

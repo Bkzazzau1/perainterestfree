@@ -1,8 +1,9 @@
 // This file mocks a bill payment provider's API
 use super::models::{BillProvider, BillProduct, FormFieldSpec};
-use serde_json::{json, Value};
+use serde_json::json;
 
 // Mock providers
+#[allow(dead_code)]
 pub fn get_mock_providers(service: &str) -> Vec<BillProvider> {
     match service {
         "cable" => vec![
@@ -20,6 +21,7 @@ pub fn get_mock_providers(service: &str) -> Vec<BillProvider> {
 }
 
 // Mock products (e.g., DStv bouquets)
+#[allow(dead_code)]
 pub fn get_mock_products(provider: &str) -> Vec<BillProduct> {
     if provider == "dstv" {
         vec![
@@ -33,6 +35,7 @@ pub fn get_mock_products(provider: &str) -> Vec<BillProduct> {
 }
 
 // Mock form fields
+#[allow(dead_code)]
 pub fn get_mock_schema(service: &str, _provider: &str) -> Vec<FormFieldSpec> {
     match service {
         "cable" => vec![

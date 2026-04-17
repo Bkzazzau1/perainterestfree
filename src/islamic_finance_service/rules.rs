@@ -11,8 +11,10 @@ pub fn is_mcc_blocked(mcc: &str) -> bool {
         "7995", // Gambling
         "7273", // Dating Services
         "5993", // Tobacco
-        // ... etc.
-    ].into_iter().collect();
+                // ... etc.
+    ]
+    .into_iter()
+    .collect();
 
     blocked_mccs.contains(mcc)
 }
@@ -21,19 +23,19 @@ pub fn is_mcc_blocked(mcc: &str) -> bool {
 /// Checks if a payment beneficiary is blocked by Islamic ethics
 pub fn is_beneficiary_blocked(beneficiary_name: &str, channel: &str) -> bool {
     let name = beneficiary_name.to_lowercase();
-    
+
     if channel == "bank" {
         // Block interest-based transactions
         if name.contains("loan") || name.contains("interest") || name.contains("finance co") {
             return true;
         }
     }
-    
+
     // Block gambling, alcohol, etc.
     if name.contains("casino") || name.contains("betting") || name.contains("liquor") {
         return true;
     }
-    
+
     false
 }
 // -------------------------------------

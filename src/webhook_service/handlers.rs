@@ -1,15 +1,19 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
-use crate::{error::AppError, AppState};
-use serde::Deserialize;
-use serde_json::json;
-use uuid::Uuid;
+#![allow(dead_code)]
+
 use crate::islamic_finance_service::rules::is_mcc_blocked;
-use sqlx::{Transaction, Postgres}; // <-- Added Postgres
 use crate::notification_service::service as notification_service;
-use tracing::info;
+use crate::{error::AppError, AppState};
+use axum::extract::Query;
+use axum::http::HeaderMap;
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use sqlx::{Postgres, Transaction}; // <-- Added Postgres
+use tracing::{debug, info, warn};
+use uuid::Uuid; // <-- UPDATED
 
 // --- Imports for v2.0 Fraud Engine ---
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
 // We don't need the fraud_service import here, as the logic is self-contained
 // in check_funding_risk for this step.
 // -------------------------------------
@@ -31,9 +35,9 @@ pub struct BrailsDeposit {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrailsCardAuth {
-    pub provider_tx_id: String, // The processor's transaction ID
+    pub provider_tx_id: String,   // The processor's transaction ID
     pub provider_card_id: String, // The card ID from Brails
-    pub amount_minor: i64,      // The amount to charge (always positive)
+    pub amount_minor: i64,        // The amount to charge (always positive)
     pub currency: String,
     pub merchant_name: String,
     pub mcc: String, // The Merchant Category Code
@@ -67,9 +71,12 @@ fn calculate_name_match(user_full_name: &str, sender_name_raw: Option<&String>) 
     };
 
     let user_name = user_full_name.trim().to_lowercase();
-    
+
     // Simple self-funding check
-    if user_name == sender_name || user_name.contains(&sender_name) || sender_name.contains(&user_name) {
+    if user_name == sender_name
+        || user_name.contains(&sender_name)
+        || sender_name.contains(&user_name)
+    {
         (1.0, true) // 100% match, self-funding
     } else {
         (0.3, false) // Low match, external
@@ -92,10 +99,8 @@ fn check_funding_risk(
     let mut risk_score = 0;
     let mut decision = "ALLOW".to_string();
 
-    let (name_match_score, is_self_funding) = calculate_name_match(
-        &user_profile.full_name,
-        payload.sender_name.as_ref(),
-    );
+    let (name_match_score, is_self_funding) =
+        calculate_name_match(&user_profile.full_name, payload.sender_name.as_ref());
 
     let is_external = !is_self_funding;
     let is_large_deposit = payload.amount_minor > 5_000_000; // ₦50,000
@@ -114,11 +119,12 @@ fn check_funding_risk(
     }
 
     // Rule: Self-funding → ALLOW up to ₦10m (Section 4)
-    if is_self_funding && payload.amount_minor > 1_000_000_000 { // ₦10m
+    if is_self_funding && payload.amount_minor > 1_000_000_000 {
+        // ₦10m
         decision = "HOLD".to_string();
         risk_score += 50; // High value, even if self-funded
     }
-    
+
     // Rule: Domestic deposits into new accounts (<7 days old) → HOLD (Section 4)
     if is_new_account && is_external {
         decision = "HOLD".to_string();
@@ -143,12 +149,12 @@ fn check_funding_risk(
 
 // --- HANDLERS ---
 
-/// Handler for POST /api/v1/webhooks/brails/deposit (REFACTORED)
+/// Handler for POST /webhooks/brails/deposit (REFACTORED)
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn brails_deposit(
     State(state): State<AppState>,
     Json(payload): Json<BrailsDeposit>,
 ) -> Result<impl IntoResponse, AppError> {
-    
     // --- 1. Find the user and wallet for this deposit ---
     // We join 'virtual_accounts', 'wallets', 'users', and 'user_profiles'
     let user_profile = sqlx::query_as!(
@@ -158,7 +164,7 @@ pub async fn brails_deposit(
             w.user_id,
             w.id as wallet_id,
             u.created_at as account_created_at,
-            CONCAT(p.first_name, ' ', p.surname) as full_name
+            COALESCE(CONCAT(p.first_name, ' ', p.surname), '') as "full_name!: String"
         FROM wallets w
         JOIN virtual_accounts va ON w.user_id = va.user_id
         JOIN users u ON w.user_id = u.id
@@ -177,7 +183,17 @@ pub async fn brails_deposit(
     let assessment = check_funding_risk(&payload, &user_profile);
 
     // --- 3. Start ATOMIC Database Transaction ---
-    let mut tx: Transaction<Postgres> = state.db_pool.begin().await.map_err(AppError::DatabaseError)?;
+    let mut tx: Transaction<Postgres> = state
+        .db_pool
+        .begin()
+        .await
+        .map_err(AppError::DatabaseError)?;
+
+    let counterparty = payload
+        .origin_bank
+        .as_deref()
+        .unwrap_or("External")
+        .to_string();
 
     // --- 4. Update Wallet (or not) ---
     if assessment.decision == "ALLOW" {
@@ -209,13 +225,22 @@ pub async fn brails_deposit(
         payload.amount_minor,
         payload.currency,
         "Incoming Deposit",
-        payload.origin_bank.as_deref().unwrap_or("External"), // counterparty
+        counterparty,      // counterparty
         payload.reference, // reference
         json!({ "provider": "brails", "sender_name": payload.sender_name })
     )
     .fetch_one(&mut *tx)
     .await
     .map_err(AppError::DatabaseError)?;
+
+    let sender_name = payload
+        .sender_name
+        .clone()
+        .unwrap_or_else(|| "External".to_string());
+    let origin_bank = payload
+        .origin_bank
+        .clone()
+        .unwrap_or_else(|| "External".to_string());
 
     // --- 6. Log to new 'funding_events' table (Section 16) ---
     sqlx::query!(
@@ -228,10 +253,10 @@ pub async fn brails_deposit(
         "#,
         user_profile.user_id,
         new_tx.id,
-        payload.sender_name,
-        assessment.name_match_score,
+        sender_name,
+        assessment.name_match_score as f32,
         !assessment.is_self_funding,
-        payload.origin_bank,
+        origin_bank,
         assessment.risk_score,
         assessment.decision
     )
@@ -263,53 +288,56 @@ pub async fn brails_deposit(
             ),
         )
     };
-    
-    notification_service::create_notification(
-        &state.db_pool,
-        user_profile.user_id,
-        &title,
-        &body
-    ).await;
+
+    notification_service::create_notification(&state.db_pool, user_profile.user_id, &title, &body)
+        .await;
 
     // --- (NEW) SEND EMAIL ---
-    let user_email = sqlx::query!("SELECT email FROM users WHERE id = $1", user_profile.user_id)
-        .fetch_one(&state.db_pool)
-        .await
-        .map(|r| r.email)
-        .unwrap_or_default(); // Fallback
-        
+    let user_email = sqlx::query!(
+        "SELECT email FROM users WHERE id = $1",
+        user_profile.user_id
+    )
+    .fetch_one(&state.db_pool)
+    .await
+    .map(|r| r.email)
+    .unwrap_or_default(); // Fallback
+
     if !user_email.is_empty() {
-        state.email_service
+        state
+            .email_service
             .send_email(
-                user_email,
-                title, // Use the same title
-                body   // Use the same body
+                user_email, title, // Use the same title
+                body,  // Use the same body
             )
             .await;
     }
     // ------------------------
 
-    tracing::info!(
+    info!(
         amount = payload.amount_minor,
         currency = %payload.currency,
         user_id = %user_profile.user_id,
         decision = %assessment.decision,
+        risk_score = assessment.risk_score,
         "Processed incoming deposit"
     );
 
     Ok(StatusCode::OK)
 }
 
-
-/// Handler for POST /api/v1/webhooks/brails/card-auth
+/// Handler for POST /webhooks/brails/card-auth
 /// Approves or declines a real-time card transaction
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn brails_card_auth(
     State(state): State<AppState>,
     Json(payload): Json<BrailsCardAuth>,
 ) -> Result<impl IntoResponse, AppError> {
-    
     // Start an ATOMIC database transaction
-    let mut tx: Transaction<Postgres> = state.db_pool.begin().await.map_err(AppError::DatabaseError)?;
+    let mut tx: Transaction<Postgres> = state
+        .db_pool
+        .begin()
+        .await
+        .map_err(AppError::DatabaseError)?;
 
     // 1. Get the card and LOCK THE ROW
     let card = sqlx::query_as!(
@@ -330,27 +358,42 @@ pub async fn brails_card_auth(
     let card = match card {
         Some(c) => c,
         None => {
+            // --- ADDED ---
+            debug!(provider_card_id = %payload.provider_card_id, "[DECLINED] Card auth: Card not found");
+            // -------------
             return Err(AppError::TransactionDeclined("Card not found".to_string()));
         }
     };
 
     if card.frozen {
+        // --- ADDED ---
+        debug!(user_id = %card.user_id, card_id = %card.id, "[DECLINED] Card auth: Card is frozen");
+        // -------------
         return Err(AppError::TransactionDeclined("Card is frozen".to_string()));
     }
 
     if payload.is_foreign && !card.allow_foreign {
+        // --- ADDED ---
+        debug!(user_id = %card.user_id, card_id = %card.id, "[DECLINED] Card auth: Foreign transactions disabled");
+        // -------------
         return Err(AppError::TransactionDeclined(
             "Foreign transactions disabled".to_string(),
         ));
     }
 
     if is_mcc_blocked(&payload.mcc) {
+        // --- ADDED ---
+        debug!(user_id = %card.user_id, card_id = %card.id, mcc = %payload.mcc, "[DECLINED] Card auth: MCC blocked");
+        // -------------
         return Err(AppError::TransactionDeclined(
             "Merchant category is blocked".to_string(),
         ));
     }
-    
+
     if card.balance_minor < payload.amount_minor {
+        // --- ADDED ---
+        debug!(user_id = %card.user_id, card_id = %card.id, "[DECLINED] Card auth: Insufficient funds");
+        // -------------
         return Err(AppError::TransactionDeclined(
             "Insufficient funds".to_string(),
         ));
@@ -391,14 +434,103 @@ pub async fn brails_card_auth(
 
     // 7. Commit the transaction
     tx.commit().await.map_err(AppError::DatabaseError)?;
-    
+
     // Log with tracing
     info!(
         tx_id = %payload.provider_tx_id,
+        card_id = %card.id,
+        user_id = %card.user_id,
         amount = payload.amount_minor,
+        mcc = %payload.mcc,
         "[APPROVED] Card auth"
     );
-    
+
     // Return 200 OK. This tells Brails "Approved".
     Ok(StatusCode::OK)
 }
+
+// --- ADD THESE ---
+#[derive(Deserialize, Debug)]
+pub struct PayscribeWebhook {
+    event_type: String,         // "bills.created", "bills.status"
+    transaction_status: String, // "success", "fail"
+    #[serde(rename = "ref")]
+    reference: String, // This is *our* reference
+    trans_id: String,           // This is Payscribe's reference
+    remark: Option<String>,
+}
+
+/// Handler for POST /webhooks/payscribe/bills
+#[axum::debug_handler] // <-- CORE FIX APPLIED
+pub async fn payscribe_bill_status(
+    State(state): State<AppState>,
+    Json(payload): Json<PayscribeWebhook>,
+) -> Result<impl IntoResponse, AppError> {
+    // Only act on the final status update
+    if payload.event_type != "bills.status" {
+        return Ok(StatusCode::OK);
+    }
+
+    let new_status = match payload.transaction_status.as_str() {
+        "success" => "completed",
+        "fail" => "failed",
+        _ => "pending", // "processing" or other
+    };
+
+    // Find the 'pending' transaction using our reference
+    let result = sqlx::query!(
+        "UPDATE transactions SET status = $1, metadata = metadata || $2 WHERE reference = $3 AND status = 'pending'",
+        new_status,
+        json!({ "provider_status": payload.remark, "provider_reference": payload.trans_id }),
+        payload.reference
+    )
+    .execute(&state.db_pool)
+    .await.map_err(AppError::DatabaseError)?;
+
+    if result.rows_affected() == 0 {
+        warn!(reference = %payload.reference, "Received webhook for unknown or completed transaction");
+        // Return OK so Payscribe stops retrying
+        return Ok(StatusCode::OK);
+    }
+
+    // (TODO) Send notification to user
+
+    info!(reference = %payload.reference, new_status = %new_status, "Updated bill payment status from webhook");
+    Ok(StatusCode::OK)
+}
+
+/// Handler for POST /api/v1/hooks/payscribe
+/// Stores/logs the incoming webhook payload and headers, responds 200.
+#[axum::debug_handler]
+pub async fn payscribe_hook(
+    State(_state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> Result<impl IntoResponse, AppError> {
+    // For now, we log payload and headers; storage can be added when schema is ready.
+    info!(?headers, ?payload, "Received Payscribe webhook");
+    Ok((StatusCode::OK, Json(json!({"ok": true}))))
+}
+
+#[derive(Deserialize)]
+pub struct PayscribeCallbackQuery {
+    pub reference: Option<String>,
+    pub status: Option<String>,
+    pub message: Option<String>,
+}
+
+/// Handler for GET /payments/payscribe/callback
+#[axum::debug_handler]
+pub async fn payscribe_callback(
+    Query(params): Query<PayscribeCallbackQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let response = json!({
+        "ok": true,
+        "reference": params.reference,
+        "status": params.status,
+        "message": params.message.unwrap_or_else(|| "Callback received".to_string()),
+    });
+
+    Ok((StatusCode::OK, Json(response)))
+}
+// -----------------

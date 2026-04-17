@@ -1,23 +1,23 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use std::collections::HashMap;
 
 #[derive(Serialize)]
+#[allow(dead_code)]
 pub struct RoleWithPermissions {
-    id: Uuid,
-    role_name: String,
-    permissions: Vec<String>,
+    pub id: Uuid,
+    pub role_name: String,
+    pub permissions: Vec<String>,
 }
 
 #[derive(Deserialize)]
 pub struct CreateRolePayload {
-    role_name: String,
-    description: String,
-    permissions: Vec<String>, // List of permission_key strings
+    pub role_name: String,
+    pub description: String,
+    pub permissions: Vec<String>, // List of permission_key strings
 }
 
 #[derive(Deserialize)]
 pub struct AssignRolePayload {
-    user_id: Uuid,
-    role_id: Uuid,
+    pub user_id: Uuid,
+    pub role_id: Uuid,
 }

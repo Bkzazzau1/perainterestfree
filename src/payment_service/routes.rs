@@ -1,18 +1,17 @@
-use axum::{
-    routing::{post},
-    Router,
-    middleware,
-};
-use crate::auth::middleware::auth_middleware;
-use crate::AppState;
 use crate::payment_service::handlers;
+use crate::AppState;
+use axum::{
+    routing::{get, post},
+    Router,
+};
 
 /// Router for all payment (P2P/payout) endpoints
 pub fn payment_router() -> Router<AppState> {
-    Router::new()
-        // Matches 'payment_api.dart'
+    Router::<AppState>::new()
+        .route(
+            "/payments/country-matrix",
+            get(handlers::get_country_matrix),
+        )
         .route("/payments/transfer", post(handlers::perform_transfer))
-        .route_layer(middleware::from_fn_with_state(
-            auth_middleware,
-        ))
+    // REMOVED: .route_layer(...)
 }

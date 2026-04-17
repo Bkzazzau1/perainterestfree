@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
     -- Extra data about the event
     metadata JSONB,
     
-    created_at TIMESTAMZ NOT NULL DEFAULT NOW(),
+    -- Corrected typo: TIMESTAMZ -> TIMESTAMPTZ
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT fk_user
         FOREIGN KEY(user_id) 

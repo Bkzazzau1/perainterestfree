@@ -19,7 +19,8 @@ impl CryptoService {
 
     // Decrypts a Base64 string, returns an error if it fails
     pub fn decrypt(&self, base64_encrypted: &str) -> Result<String, String> {
-        self.crypt.decrypt_base64_to_string(base64_encrypted)
+        self.crypt
+            .decrypt_base64_to_string(base64_encrypted)
             .map_err(|e| e.to_string())
     }
 }

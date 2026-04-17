@@ -1,20 +1,21 @@
+use crate::auth::jwt::Claims;
+use crate::sessions_service::models::UserSession;
+use crate::{error::AppError, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json, Extension,
+    Extension, Json,
 };
-use crate::{error::AppError, AppState};
-use crate::auth::jwt::Claims;
-use crate::sessions_service::models::UserSession;
-use uuid::Uuid;
+use tracing::info;
+use uuid::Uuid; // <-- ADD THIS
 
 /// Handler for GET /api/v1/sessions
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn get_sessions(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError> {
-    
     let current_session_id = claims.jti; // Get ID of the *current* token
 
     let sessions = sqlx::query!(
@@ -27,7 +28,8 @@ pub async fn get_sessions(
         claims.sub
     )
     .fetch_all(&state.db_pool)
-    .await.map_err(AppError::DatabaseError)?
+    .await
+    .map_err(AppError::DatabaseError)?
     .into_iter()
     .map(|row| UserSession {
         id: row.id,
@@ -39,17 +41,21 @@ pub async fn get_sessions(
         is_current_session: row.id == current_session_id,
     })
     .collect::<Vec<_>>();
-    
+
+    // --- ADDED ---
+    info!(user_id = %claims.sub, "Fetched user sessions");
+    // -------------
+
     Ok((StatusCode::OK, Json(sessions)))
 }
 
 /// Handler for DELETE /api/v1/sessions/:id
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn revoke_session(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-
     // This just deletes the session. The auth_middleware will handle the rest.
     sqlx::query!(
         "DELETE FROM user_sessions WHERE id = $1 AND user_id = $2",
@@ -57,7 +63,12 @@ pub async fn revoke_session(
         claims.sub // Ensure user can only delete their own sessions
     )
     .execute(&state.db_pool)
-    .await.map_err(AppError::DatabaseError)?;
+    .await
+    .map_err(AppError::DatabaseError)?;
+
+    // --- ADDED ---
+    info!(user_id = %claims.sub, session_id = %id, "User revoked session");
+    // -------------
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1,20 +1,19 @@
-use axum::{
-    routing::{post},
-    Router,
-    middleware,
-};
+use crate::webhook_service::handlers;
 use crate::AppState;
-use crate::webhook_service::{handlers, middleware::brails_auth};
+use axum::{routing::post, Router};
 
-/// Router for all incoming webhooks (public, custom auth)
+/// Router for all incoming webhooks
 pub fn webhook_router() -> Router<AppState> {
     Router::new()
-        // Webhook for card deposits
-        .route("/api/v1/webhooks/brails/deposit", post(handlers::brails_deposit))
-        // Webhook for real-time card authorization
+        // Brails Webhooks - Middleware will be applied in main.rs
+        .route("/webhooks/brails/deposit", post(handlers::brails_deposit))
         .route(
-            "/api/v1/webhooks/brails/card-auth",
+            "/webhooks/brails/card-auth",
             post(handlers::brails_card_auth),
         )
-        .route_layer(middleware::from_fn_with_state(brails_auth))
+        // Payscribe Webhook - Middleware will be applied in main.rs
+        .route(
+            "/webhooks/payscribe/bills",
+            post(handlers::payscribe_bill_status),
+        )
 }

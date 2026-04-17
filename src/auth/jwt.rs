@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The claims (payload) part of the JWT.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Uuid, // User ID
     pub jti: Uuid, // Session ID
@@ -15,14 +15,13 @@ pub struct Claims {
 
 /// Creates a new JWT token for a given user ID and session ID.
 pub fn create_token(
-    user_id: Uuid, 
+    user_id: Uuid,
     session_id: Uuid, // <-- Added session_id
-    secret: &str
+    secret: &str,
 ) -> Result<String, AppError> {
-    
     let now = Utc::now();
-    let expires_in = Duration::days(7); 
-    
+    let expires_in = Duration::days(7);
+
     let claims = Claims {
         sub: user_id,
         jti: session_id, // <-- Set session_id as jti

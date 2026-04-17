@@ -8,5 +8,8 @@ pub struct AppConfigResponse {
     pub monthly_limit_fmt: String,
     pub app_version: String,
     pub build_number: String,
+    pub company_name: String,
+    pub copyright_text: String,
+    pub support_email: String,
     pub certificate_url: String, // URL to the PDF
 }

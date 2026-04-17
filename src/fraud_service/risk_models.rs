@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 // Section 6: Cross-Border Risk Model
-enum RiskZone {
+#[derive(Debug)]
+pub enum RiskZone {
     Low,
     Medium,
     High,
@@ -9,16 +10,14 @@ enum RiskZone {
 
 pub fn get_country_risk(country_code: &str) -> (RiskZone, i32) {
     let code = country_code.to_uppercase();
-    
+
     // LOW RISK (Section 6)
-    let low_risk: HashSet<&str> = [
-        "UK", "US", "EU", "CA", "AU", "KE", "GH", "NG",
-    ].into_iter().collect();
-    
+    let low_risk: HashSet<&str> = ["UK", "US", "EU", "CA", "AU", "KE", "GH", "NG"]
+        .into_iter()
+        .collect();
+
     // MEDIUM RISK (Section 6)
-    let medium_risk: HashSet<&str> = [
-        "AE", "CN", "IN", "TR",
-    ].into_iter().collect();
+    let medium_risk: HashSet<&str> = ["AE", "CN", "IN", "TR"].into_iter().collect();
 
     if low_risk.contains(code.as_str()) {
         (RiskZone::Low, -15) // Section 14
@@ -31,6 +30,7 @@ pub fn get_country_risk(country_code: &str) -> (RiskZone, i32) {
 }
 
 // Section 5: Spending Behavior
+#[derive(Debug)]
 pub enum SpendingCategory {
     Business,
     Individual,

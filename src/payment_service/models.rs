@@ -9,9 +9,9 @@ pub struct TransferPayload {
     pub source_currency: String, // "NGN", "USD", etc.
     pub country: String,
     pub channel: String, // "bank", "mobile_money"
-    pub amount: f64, // The major unit amount (e.g., 100.50)
+    pub amount: f64,     // The major unit amount (e.g., 100.50)
     pub note: String,
-    pub pin: String, // Plain-text PIN from client
+    pub pin: String,        // Plain-text PIN from client
     pub beneficiary: Value, // We'll parse this as JSON
 }
 

@@ -1,13 +1,11 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json, Extension};
-use crate::{error::AppError, AppState};
 use crate::admin_auth_service::models::AdminClaims;
-use crate::admin_settings_service::{
-    models::UpdateSettingsPayload,
-    service::get_all_settings,
-};
+use crate::admin_settings_service::{models::UpdateSettingsPayload, service::get_all_settings};
+use crate::{error::AppError, AppState};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use tracing::info;
 
 /// Handler for GET /api/v1/admin/settings
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn get_settings(
     State(state): State<AppState>,
     Extension(claims): Extension<AdminClaims>,
@@ -16,12 +14,18 @@ pub async fn get_settings(
     if claims.role != "super_admin" {
         return Err(AppError::Unauthorized);
     }
-    
+
     let settings = get_all_settings(&state.db_pool).await?;
+
+    // --- ADDED ---
+    info!(admin_id = %claims.sub, "Viewed system settings");
+    // -------------
+
     Ok((StatusCode::OK, Json(settings)))
 }
 
 /// Handler for POST /api/v1/admin/settings
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn update_settings(
     State(state): State<AppState>,
     Extension(claims): Extension<AdminClaims>,
@@ -31,8 +35,12 @@ pub async fn update_settings(
         return Err(AppError::Unauthorized);
     }
 
-    let mut tx = state.db_pool.begin().await.map_err(AppError::DatabaseError)?;
-    
+    let mut tx = state
+        .db_pool
+        .begin()
+        .await
+        .map_err(AppError::DatabaseError)?;
+
     for (key, value) in payload.settings {
         sqlx::query!(
             r#"
@@ -49,9 +57,9 @@ pub async fn update_settings(
         .await
         .map_err(AppError::DatabaseError)?;
     }
-    
+
     tx.commit().await.map_err(AppError::DatabaseError)?;
-    
+
     info!(admin_id = %claims.sub, "Updated system settings");
     Ok((StatusCode::OK, "Settings updated"))
 }

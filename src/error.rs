@@ -18,16 +18,16 @@ pub enum AppError {
 
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
-    
+
     #[error("Hashing error: {0}")]
     HashError(#[from] bcrypt::BcryptError),
-    
+
     #[error("Invalid credentials")]
     InvalidCredentials,
 
     #[error("Token creation error")]
     TokenCreationError,
-    
+
     #[error("Authentication required")]
     Unauthorized,
 
@@ -37,9 +37,15 @@ pub enum AppError {
     #[error("KYC profile is incomplete")]
     KycIncomplete,
 
+    #[error("Forbidden")]
+    Forbidden,
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     #[error("Provider error: {0}")]
     ProviderError(String),
-    
+
     #[error("Account already exists")]
     AccountAlreadyExists,
 
@@ -58,23 +64,25 @@ impl IntoResponse for AppError {
 
         let (status, error_message) = match self {
             // --- 500 Internal Server Errors ---
-            AppError::DatabaseError(_) | 
-            AppError::InternalServerError | 
-            AppError::TaskPanic | 
-            AppError::HashError(_) |
-            AppError::TokenCreationError |
-            AppError::TokenDecodeError(_) => (
+            AppError::DatabaseError(_)
+            | AppError::InternalServerError
+            | AppError::TaskPanic
+            | AppError::HashError(_)
+            | AppError::TokenCreationError
+            | AppError::TokenDecodeError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "An internal server error occurred".to_string(),
             ),
-            
+
             // --- 401 Unauthorized ---
             AppError::InvalidCredentials => {
                 (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string())
             }
-            AppError::Unauthorized => {
-                (StatusCode::UNAUTHORIZED, "Authentication required".to_string())
-            }
+            AppError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "Authentication required".to_string(),
+            ),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "Forbidden".to_string()),
 
             // --- 400 Bad Request ---
             AppError::ProviderError(msg) => {
@@ -87,14 +95,19 @@ impl IntoResponse for AppError {
             }
 
             // --- 409 Conflict ---
-            AppError::AccountAlreadyExists => {
-                (StatusCode::CONFLICT, "Virtual account already exists".to_string())
-            }
-            
+            AppError::AccountAlreadyExists => (
+                StatusCode::CONFLICT,
+                "Virtual account already exists".to_string(),
+            ),
+
+            // --- 404 Not Found ---
+            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
+
             // --- 412 Precondition Failed ---
-            AppError::KycIncomplete => {
-                (StatusCode::PRECONDITION_FAILED, "KYC profile is incomplete".to_string())
-            }
+            AppError::KycIncomplete => (
+                StatusCode::PRECONDITION_FAILED,
+                "KYC profile is incomplete".to_string(),
+            ),
         };
 
         let body = Json(json!({ "error": error_message }));

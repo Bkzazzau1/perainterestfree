@@ -1,22 +1,59 @@
+use crate::auth::{jwt::Claims, security::verify_value};
+use crate::fraud_service::service as fraud_service;
+use crate::payment_service::models::{TransferPayload, TransferResponse};
+use crate::{error::AppError, AppState};
 use axum::{
     extract::{ConnectInfo, State}, // <-- Added ConnectInfo
     http::StatusCode,
     response::IntoResponse,
-    Json, Extension,
+    Extension,
+    Json,
 };
-use axum::headers::UserAgent; // <-- Added
-use axum::TypedHeader; // <-- Added
-use std::net::SocketAddr; // <-- Added
-use crate::{error::AppError, AppState};
-use crate::auth::{jwt::Claims, security::verify_value};
-use crate::payment_service::models::{TransferPayload, TransferResponse};
+use axum_extra::{headers::UserAgent, TypedHeader}; // <-- Updated
 use serde_json::json;
-use uuid::Uuid;
-use tracing::info;
-use crate::fraud_service::service as fraud_service; // <-- Use the service
+use std::net::SocketAddr; // <-- Added
+use tracing::{debug, info}; // <-- UPDATED
+use uuid::Uuid; // <-- Use the service
+
+/// Handler for GET /api/v1/payments/country-matrix
+#[axum::debug_handler]
+pub async fn get_country_matrix() -> Result<impl IntoResponse, AppError> {
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "Kenya": ["bank", "mobile_money"],
+            "Ghana": ["bank", "mobile_money"],
+            "Uganda": ["bank", "mobile_money"],
+            "Tanzania": ["bank", "mobile_money"],
+            "Zambia": ["bank", "mobile_money"],
+            "Malawi": ["bank", "mobile_money"],
+            "Senegal": ["bank", "mobile_money"],
+            "Ivory Coast": ["bank", "mobile_money"],
+            "Cameroon": ["bank", "mobile_money"],
+            "Guinea": ["bank", "mobile_money"],
+            "Burkina Faso": ["bank", "mobile_money"],
+            "Mali": ["bank", "mobile_money"],
+            "Togo": ["bank", "mobile_money"],
+            "Benin": ["bank", "mobile_money"],
+            "Niger Republic": ["bank", "mobile_money"],
+            "Nigeria": ["bank"],
+            "United States": ["bank"],
+            "United Kingdom": ["bank"],
+            "France": ["bank"],
+            "Spain": ["bank"],
+            "Italy": ["bank"],
+            "Australia": ["bank"],
+            "Singapore": ["bank"],
+            "United Arab Emirates": ["bank"],
+            "China": ["bank"],
+            "DR Congo": ["bank"]
+        })),
+    ))
+}
 
 /// Handler for POST /api/v1/payments/transfer
 /// This is the core P2P / Payout endpoint
+#[axum::debug_handler] // <-- CORE FIX APPLIED
 pub async fn perform_transfer(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -24,24 +61,26 @@ pub async fn perform_transfer(
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     Json(payload): Json<TransferPayload>,
 ) -> Result<impl IntoResponse, AppError> {
-
     let user_id = claims.sub;
     let ip_address = ip.to_string();
     let user_agent_str = user_agent.to_string();
-    
-    // --- 1. Security: Verify PIN ---
-    let user = sqlx::query!(
-        "SELECT pin_hash FROM users WHERE id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db_pool)
-    .await.map_err(AppError::DatabaseError)?
-    .ok_or(AppError::Unauthorized)?; // Should not happen
 
-    let pin_hash = user.pin_hash.ok_or(AppError::ProviderError("PIN_NOT_SET".to_string()))?;
-    
+    // --- 1. Security: Verify PIN ---
+    let user = sqlx::query!("SELECT pin_hash FROM users WHERE id = $1", user_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(AppError::DatabaseError)?
+        .ok_or(AppError::Unauthorized)?; // Should not happen
+
+    let pin_hash = user
+        .pin_hash
+        .ok_or(AppError::ProviderError("PIN_NOT_SET".to_string()))?;
+
     let pin_valid = verify_value(payload.pin, pin_hash).await?;
     if !pin_valid {
+        // --- ADDED ---
+        debug!(user_id = %user_id, "P2P transfer failed: incorrect PIN");
+        // -------------
         return Err(AppError::InvalidCredentials); // "Invalid credentials"
     }
 
@@ -50,8 +89,9 @@ pub async fn perform_transfer(
     if amount_minor <= 0 {
         return Err(AppError::ProviderError("Invalid amount".to_string()));
     }
-    
-    let counterparty = payload.beneficiary
+
+    let counterparty = payload
+        .beneficiary
         .get("account_name")
         .or_else(|| payload.beneficiary.get("full_name"))
         .and_then(|v| v.as_str())
@@ -59,7 +99,11 @@ pub async fn perform_transfer(
         .to_string();
 
     // --- 3. Start ATOMIC Transaction ---
-    let mut tx = state.db_pool.begin().await.map_err(AppError::DatabaseError)?;
+    let mut tx = state
+        .db_pool
+        .begin()
+        .await
+        .map_err(AppError::DatabaseError)?;
 
     // --- 4. (NEW) Call v2.0 Fraud Engine ---
     let assessment = fraud_service::check_payment_risk(
@@ -76,13 +120,24 @@ pub async fn perform_transfer(
 
     // --- 5. Check Decision ---
     if assessment.decision == "BLOCK" {
+        // --- ADDED --- (Log was already here, but for clarity)
+        info!(user_id = %user_id, score = assessment.risk_score, "P2P transfer blocked by fraud check");
+        // -------------
         // Log this critical event
         fraud_service::log_alert(
-            &mut tx, user_id, None, "BLOCK_DECISION", "critical",
-            "declined", json!({"rules": assessment.rules_triggered})
-        ).await?;
+            &mut tx,
+            user_id,
+            None,
+            "BLOCK_DECISION",
+            "critical",
+            "declined",
+            json!({"rules": assessment.rules_triggered}),
+        )
+        .await?;
         tx.commit().await.ok(); // Commit the log, but decline the payment
-        return Err(AppError::TransactionDeclined("Transaction blocked by risk policy".to_string()));
+        return Err(AppError::TransactionDeclined(
+            "Transaction blocked by risk policy".to_string(),
+        ));
     }
 
     // --- 6. Get Wallet and Lock Row ---
@@ -104,6 +159,9 @@ pub async fn perform_transfer(
     // --- 7. Check Balance ---
     if wallet.balance_minor < amount_minor {
         tx.rollback().await.ok(); // Rollback is best-effort
+                                  // --- ADDED ---
+        debug!(user_id = %user_id, currency = %payload.source_currency, "P2P transfer failed: insufficient funds");
+        // -------------
         return Err(AppError::ProviderError("Insufficient funds".to_string()));
     }
 
@@ -139,14 +197,14 @@ pub async fn perform_transfer(
         format!("Send to {}", payload.country), // title
         counterparty, // counterparty
         Uuid::new_v4().to_string(), // Mock reference
-        json!({ "rules": assessment.rules_triggered, "score": assessment.risk_score }),
+        json!({ "rules": assessment.rules_triggered, "score": assessment.risk_score, "note": payload.note }),
         ip_address,
         user_agent_str
     )
     .fetch_one(&mut *tx)
     .await
     .map_err(AppError::DatabaseError)?;
-    
+
     // --- 10. (NEW) Update Behavior Profile (Section 16) ---
     sqlx::query!(
         r#"
@@ -176,7 +234,7 @@ pub async fn perform_transfer(
         country: payload.country,
         source_currency: payload.source_currency,
     };
-    
+
     info!(
         user_id = %user_id,
         tx_id = %new_tx.id,
@@ -184,6 +242,6 @@ pub async fn perform_transfer(
         score = assessment.risk_score,
         "Processed P2P transfer"
     );
-    
+
     Ok((StatusCode::OK, Json(response)))
 }

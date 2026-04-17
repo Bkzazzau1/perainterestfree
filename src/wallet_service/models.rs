@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize}; // <-- Added Deserialize
-use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize}; // <-- Added Deserialize
+use sqlx::FromRow;
+use uuid::Uuid;
 
 // This matches the 'WalletSummary' class and the JSON in 'wallets_controller.dart'
 #[derive(Serialize)]
@@ -14,7 +15,7 @@ pub struct WalletSummary {
 
 // --- ADD THIS STRUCT ---
 /// Query parameters for GET /wallets/transactions
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryQuery {
     pub q: Option<String>, // Search query
@@ -26,7 +27,7 @@ pub struct HistoryQuery {
 
 // --- UPDATE THIS STRUCT ---
 // Matches the 'Tx' model used in 'receipt_view.dart'
-#[derive(Serialize)]
+#[derive(Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Transaction {
     pub id: Uuid,

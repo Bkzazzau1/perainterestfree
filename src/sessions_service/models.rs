@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

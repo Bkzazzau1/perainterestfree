@@ -1,20 +1,24 @@
 use axum::{
-    extract::{Request, State},
-    http::{header, StatusCode},
+    body::Body,
+    extract::State,
+    http::{header, Request},
     middleware::Next,
     response::Response,
 };
+
 use crate::{auth::jwt, error::AppError, AppState};
 
 /// Axum middleware for authenticating requests.
+///
+/// Works with axum 0.7 using `middleware::from_fn_with_state`.
 pub async fn auth_middleware(
     State(state): State<AppState>,
-    mut req: Request,
+    mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
-
-    // 1. Extract the token
-    let token = req.headers()
+    // 1. Extract the token from Authorization: Bearer <token>
+    let token = req
+        .headers()
         .get(header::AUTHORIZATION)
         .and_then(|auth_header| auth_header.to_str().ok())
         .and_then(|auth_value| {
@@ -26,29 +30,34 @@ pub async fn auth_middleware(
         })
         .ok_or(AppError::Unauthorized)?;
 
-    // 2. Decode and validate the token (checks expiry, signature)
+    // 2. Decode and validate the token (expiry, signature, etc.)
     let claims = jwt::decode_token(&token, &state.jwt_secret)?;
-    
-    // --- 3. (NEW) Check if the session is valid in the database ---
+
+    // 3. Check if the session is still valid in the database
     let session_status = sqlx::query!(
-        "SELECT status FROM user_sessions WHERE id = $1 AND user_id = $2 AND expires_at > NOW()",
-        claims.jti, // The session ID from the token
-        claims.sub  // The user ID
+        r#"
+        SELECT status
+        FROM user_sessions
+        WHERE id = $1
+          AND user_id = $2
+          AND expires_at > NOW()
+        "#,
+        claims.jti, // session ID from token
+        claims.sub  // user ID
     )
     .fetch_optional(&state.db_pool)
     .await
     .map_err(AppError::DatabaseError)?
-    .map_or("".to_string(), |r| r.status); // Get status, default to empty string if not found
+    .map_or_else(|| "".to_string(), |r| r.status);
 
     if session_status != "active" {
-        // This session was logged out, revoked, or expired.
-        // The token is now invalid.
+        // Session was logged out, revoked, or expired.
         return Err(AppError::Unauthorized);
     }
-    // -------------------------------------------------------------
 
-    // 4. Insert claims for the handler
+    // 4. Attach claims so handlers can access them
     req.extensions_mut().insert(claims);
 
+    // 5. Continue the request chain
     Ok(next.run(req).await)
 }

@@ -14,6 +14,6 @@ CREATE TABLE IF NOT EXISTS virtual_accounts (
         ON DELETE CASCADE,
     
     -- A user should only have one NGN virtual account
-    CONSTRAINT unique_user_currency
-        UNIQUE(user_id, currency)
+    -- Renamed constraint to avoid conflict with wallets table
+    CONSTRAINT unique_user_virtual_account UNIQUE(user_id, currency)
 );

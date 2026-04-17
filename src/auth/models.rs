@@ -5,6 +5,7 @@ use uuid::Uuid; // <-- ADD THIS
 #[derive(Deserialize)]
 pub struct RegisterUser {
     pub email: String,
+    #[allow(dead_code)]
     pub otp: String,
     pub password: String,
     pub phone: String,
@@ -14,6 +15,33 @@ pub struct LoginUser {
     pub id: String,
     pub password: String,
 }
+
+#[derive(Deserialize)]
+pub struct OtpRequest {
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct VerifyOtpRequest {
+    pub code: String,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PasswordResetRequest {
+    pub email: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordResetConfirmRequest {
+    pub email: String,
+    pub code: String,
+    pub new_password: String,
+}
+
 #[derive(Serialize)]
 pub struct TokenResponse {
     pub token: String,
@@ -24,8 +52,11 @@ pub struct TokenResponse {
 #[derive(Serialize)]
 pub struct UserResponse {
     pub id: Uuid,
+    pub display_name: Option<String>,
     pub email: String,
     pub phone: String,
     pub kyc_status: String,
+    pub email_verified: bool,
+    pub phone_verified: bool,
 }
 // -------------------------

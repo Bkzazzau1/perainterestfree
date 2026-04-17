@@ -4,41 +4,48 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Axum and Tokio
-axum = "0.8.7"
-tokio = { version = "1", features = ["full"] }
+# Web Framework (Pinned for stability)
+axum = { version = "0.7.5", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tower = { version = "0.4.13", features = ["util"] }
+tower-http = { version = "0.5.2", features = ["trace"] }
+tokio = { version = "1.38", features = ["full"] }
 tokio-stream = "0.1"
 
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Database & Environment
+# Database
 dotenvy = "0.15"
-sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros" ] }
+sqlx = { version = "0.7.4", features = [ "runtime-tokio", "postgres", "macros", "uuid", "chrono", "time", "bigdecimal" ] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Auth & Crypto
-bcrypt = "0.17.1"
-jsonwebtoken = "10.2.0"
-magic-crypt = "4.0.1"
+bcrypt = "0.15"
+jsonwebtoken = "9.3"
+magic-crypt = "3.1"
 
 # Utilities
-thiserror = "2.0.17"
+thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }
 reqwest = { version = "0.12", features = ["json"] }
+rand = "0.8"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# Email (FIXED)
+# Data Export
+csv = "1.3"
+
+# Email
 [dependencies.lettre]
-version = "0.11.19"
+version = "0.11"
 default-features = false
 features = [
     "builder",
-    "smtp-transport",
     "tokio1",
-    "tokio1-native-tls"
+    "tokio1-native-tls", 
+    "smtp-transport"
 ]

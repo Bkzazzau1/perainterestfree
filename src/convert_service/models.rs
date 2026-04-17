@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 pub struct ConvertPayload {
     pub from_currency: String, // "USD", "NGN", "USDT"
     pub to_currency: String,   // "USD", "NGN", "USDT"
-    
+
     // Amount of 'from_currency' in minor units
-    pub amount_minor: i64, 
-    
+    pub amount_minor: i64,
+
     pub pin: String,
 }
 

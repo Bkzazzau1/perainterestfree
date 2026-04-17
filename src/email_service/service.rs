@@ -1,16 +1,14 @@
 use lettre::{
-    Message, SmtpTransport, Transport,
-    message::builder::MessageBuilder,
-    transport::smtp::authentication::Credentials,
+    transport::smtp::authentication::Credentials, AsyncSmtpTransport, AsyncTransport, Message,
+    Tokio1Executor,
 };
-use lettre::AsyncTokio1Transport; // Use the tokio-compatible transport
 use std::env;
 use tracing::{error, info};
 
 /// The EmailService struct holds the mailer instance
 #[derive(Clone)]
 pub struct EmailService {
-    mailer: SmtpTransport,
+    mailer: AsyncSmtpTransport<Tokio1Executor>,
     from_email: String,
 }
 
@@ -29,12 +27,12 @@ impl EmailService {
         let creds = Credentials::new(username, password);
 
         // Build the mailer
-        let mailer = SmtpTransport::relay(&server)
+        let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&server)
             .expect("Failed to create SMTP relay")
             .port(port)
             .credentials(creds)
             .build();
-            
+
         info!(smtp_server = %server, "Email service initialized");
 
         Self { mailer, from_email }
@@ -43,21 +41,29 @@ impl EmailService {
     /// Sends an email asynchronously
     /// We use 'tokio::spawn' to send the email in the background
     /// so it doesn't block the API response.
-    pub async fn send_email(
-        &self,
-        to: String,
-        subject: String,
-        body_text: String,
-    ) {
-        let email = Message::builder()
-            .from(self.from_email.parse().unwrap())
-            .to(to.parse().expect("Failed to parse 'to' email"))
+    pub async fn send_email(&self, to: String, subject: String, body_text: String) {
+        let Ok(from) = self.from_email.parse() else {
+            error!(from_email = %self.from_email, "Failed to parse sender email");
+            return;
+        };
+
+        let Ok(to_addr) = to.parse() else {
+            error!(email_to = %to, "Failed to parse recipient email");
+            return;
+        };
+
+        let Ok(email) = Message::builder()
+            .from(from)
+            .to(to_addr)
             .subject(subject.clone())
             .body(body_text)
-            .expect("Failed to build email");
+        else {
+            error!(email_to = %to, subject = %subject, "Failed to build email message");
+            return;
+        };
 
         let mailer = self.mailer.clone();
-        
+
         // Spawn a background task for the email
         tokio::spawn(async move {
             match mailer.send(email).await {
